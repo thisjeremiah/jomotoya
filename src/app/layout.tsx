@@ -17,8 +17,8 @@ const plexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "jotoya",
-  description: "jotoya",
+  title: "JOMOTOYA",
+  description: "JOMOTOYA",
 };
 
 export default function RootLayout({
