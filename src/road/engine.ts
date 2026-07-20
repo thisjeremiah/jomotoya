@@ -36,21 +36,26 @@ export interface EngineCallbacks {
   onFork: (options: ForkOption[] | null) => void;
   /** High-level state, for HUD/hints. */
   onState: (state: DriveState) => void;
+  /** Optional "pull off to read {label}" prompt, or null to clear it. */
+  onPrompt: (label: string | null) => void;
 }
 
-const LOW_W = 320;
-const LOW_H = 240;
+const BASE_H = 240; // internal vertical resolution — fixes the pixel scale
+const MAX_W = 760; // cap horizontal buffer size (perf on ultrawide)
 const LEVELS = 5; // gray levels out of the dither
 const CRUISE = 7200; // world units / second
+const COAST = 0.34; // speed factor while a landmark is offered (time to decide)
 const STOP_OFFSET = 9 * ROAD.SEG_LEN; // how far before the obelisk we halt
-const TRIGGER_SEGMENTS = 34; // begin the focus beat this many segments out
+const PROMPT_LEAD = 48 * ROAD.SEG_LEN; // show the pull-off prompt this far out
+const JUNCTION_MARGIN = 8; // segments of runway kept before the junction
 
 export class RoadEngine {
   private display: HTMLCanvasElement;
   private dctx: CanvasRenderingContext2D;
   private low: HTMLCanvasElement;
   private lctx: CanvasRenderingContext2D;
-  private buffer: ImageData;
+  private lowW = 320;
+  private lowH = BASE_H;
 
   private manifest: Manifest;
   private cb: EngineCallbacks;
@@ -73,6 +78,9 @@ export class RoadEngine {
   private raf = 0;
   private running = false;
   private stopPos = Infinity;
+  private junctionPos = Infinity;
+  private pulledOff = false; // already read this edge's landmark?
+  private nearLandmark = false; // currently inside the pull-off window?
   private forkPending: ForkOption[] | null = null;
 
   constructor(display: HTMLCanvasElement, manifest: Manifest, cb: EngineCallbacks) {
@@ -84,10 +92,9 @@ export class RoadEngine {
     this.dctx.imageSmoothingEnabled = false;
 
     this.low = document.createElement("canvas");
-    this.low.width = LOW_W;
-    this.low.height = LOW_H;
+    this.low.width = this.lowW;
+    this.low.height = this.lowH;
     this.lctx = this.low.getContext("2d", { willReadFrequently: true })!;
-    this.buffer = this.lctx.createImageData(LOW_W, LOW_H);
 
     // Opening: drive in toward the start node — its arrival is the first beat.
     this.loadEdgeToward("__intro__", manifest.start);
@@ -117,6 +124,27 @@ export class RoadEngine {
     this.display.width = Math.max(1, Math.floor(cssW * dpr));
     this.display.height = Math.max(1, Math.floor(cssH * dpr));
     this.dctx.imageSmoothingEnabled = false;
+
+    // Size the low-res buffer to the viewport's aspect ratio. Vertical
+    // resolution is fixed (so the pixel/dither scale looks the same on any
+    // screen); width follows the aspect so the scene fills edge-to-edge with no
+    // letterbox bars. Cap the width on ultrawide by trimming height to keep the
+    // buffer aspect exactly equal to the display (no stretching).
+    const aspect = cssW / Math.max(1, cssH);
+    let h = BASE_H;
+    let w = Math.round(h * aspect);
+    if (w > MAX_W) {
+      const k = MAX_W / w;
+      w = MAX_W;
+      h = Math.max(120, Math.round(h * k));
+    }
+    if (w < 1) w = 1;
+    if (w !== this.lowW || h !== this.lowH) {
+      this.lowW = w;
+      this.lowH = h;
+      this.low.width = w;
+      this.low.height = h;
+    }
   }
 
   // --- public controls (wired to keyboard / buttons in React) --------------
@@ -136,12 +164,23 @@ export class RoadEngine {
     this.enterDriving();
   }
 
-  /** Dismiss the reading panel and resume the journey. */
+  /** Opt in to reading the landmark ahead. Never happens automatically. */
+  pullOff(): void {
+    if (this.state !== "DRIVING" || !this.nearLandmark || this.forkPending) return;
+    this.nearLandmark = false;
+    this.cb.onPrompt(null);
+    this.state = "FOCUS";
+    this.cb.onState("FOCUS");
+    this.audio.sting();
+  }
+
+  /** Dismiss the reading panel and rejoin the road toward the junction. */
   leaveReading(): void {
     if (this.state !== "READING") return;
     this.audio.setReading(false);
     this.cb.onReading(null);
-    this.departFrom(this.destNodeId);
+    // Continue forward on the same edge — the junction still waits at its end.
+    this.enterDriving();
   }
 
   /** Internal document link: travel to a specific connected node. */
@@ -151,6 +190,7 @@ export class RoadEngine {
     const match = out.find((e) => e.to === nodeId);
     this.audio.setReading(false);
     this.cb.onReading(null);
+    this.cb.onPrompt(null);
     this.forkPending = null;
     this.cb.onFork(null);
     if (match) {
@@ -177,7 +217,11 @@ export class RoadEngine {
     this.destNodeId = toId;
     this.position = 0;
     this.stopPos = edge.landmark.segment * ROAD.SEG_LEN - STOP_OFFSET;
+    this.junctionPos = (edge.segments.length - JUNCTION_MARGIN) * ROAD.SEG_LEN;
     this.focus = 0;
+    this.pulledOff = false;
+    this.nearLandmark = false;
+    this.cb.onPrompt(null);
   }
 
   private enterDriving(): void {
@@ -228,25 +272,28 @@ export class RoadEngine {
   private update(dt: number): void {
     const idlingAtFork = this.forkPending !== null && this.state === "DRIVING";
 
-    // Target speed per state.
-    let targetSpeed = CRUISE;
-    if (this.state === "READING") targetSpeed = 0;
-    else if (this.state === "FOCUS") targetSpeed = 0;
-    else if (idlingAtFork) targetSpeed = 0; // wait for the driver to choose
-
-    // Ease speed (spring-ish) toward the target.
-    this.speed += (targetSpeed - this.speed) * Math.min(1, dt * (this.state === "FOCUS" ? 2.2 : 3.5));
-    if (this.speed < 1 && targetSpeed === 0) this.speed = 0;
-
     if (this.state === "DRIVING") {
-      this.position += this.speed * dt;
+      if (!idlingAtFork) {
+        this.position += this.speed * dt;
 
-      // Approaching the landmark: begin the authored arrival.
-      const trigger = this.stopPos - TRIGGER_SEGMENTS * ROAD.SEG_LEN;
-      if (!idlingAtFork && this.position >= trigger) {
-        this.state = "FOCUS";
-        this.cb.onState("FOCUS");
-        this.audio.sting();
+        // Offer (never force) the pull-off while inside the window before the
+        // landmark. The driver opts in with pullOff(); otherwise they cruise by.
+        const near =
+          !this.pulledOff &&
+          this.position >= this.stopPos - PROMPT_LEAD &&
+          this.position < this.stopPos;
+        if (near !== this.nearLandmark) {
+          this.nearLandmark = near;
+          this.cb.onPrompt(near ? nodeById(this.manifest, this.destNodeId).label : null);
+        }
+
+        // Reaching the end of the road is the junction: pick the next road.
+        if (!this.forkPending && this.position >= this.junctionPos) {
+          this.position = this.junctionPos;
+          this.nearLandmark = false;
+          this.cb.onPrompt(null);
+          this.departFrom(this.destNodeId);
+        }
       }
     } else if (this.state === "FOCUS") {
       // Eased approach to the framed stop point (guaranteed to converge), plus
@@ -257,7 +304,9 @@ export class RoadEngine {
 
       const arrived = this.position >= this.stopPos - 4 && this.focus > 0.985;
       if (arrived) {
+        this.position = this.stopPos;
         this.focus = 1;
+        this.pulledOff = true; // don't re-offer this landmark after leaving
         this.state = "READING";
         this.cb.onState("READING");
         this.audio.setReading(true);
@@ -272,6 +321,14 @@ export class RoadEngine {
       this.focus += (0 - this.focus) * Math.min(1, dt * 3);
       this.camHeight += (ROAD.CAMERA_HEIGHT - this.camHeight) * Math.min(1, dt * 3);
     }
+
+    // Target speed, decided AFTER the state logic so it can react to the
+    // pull-off window: coast down near a landmark to give time to decide.
+    let targetSpeed = CRUISE;
+    if (this.state !== "DRIVING" || idlingAtFork) targetSpeed = 0;
+    else if (this.nearLandmark) targetSpeed = CRUISE * COAST;
+    this.speed += (targetSpeed - this.speed) * Math.min(1, dt * (this.state === "FOCUS" ? 2.2 : 3.2));
+    if (this.speed < 1 && targetSpeed === 0) this.speed = 0;
 
     // Lane easing (lagged follow) + sway + bank into the current curve.
     const laneTarget = this.targetLane * ROAD.LANE_OFFSET;
@@ -298,7 +355,9 @@ export class RoadEngine {
       camHeight: this.camHeight + Math.sin(this.sway * 1.7) * 6 * (this.speed / CRUISE),
     };
 
-    const { landmarkScreen } = renderRoad(ctx, this.edge, view, LOW_W, LOW_H);
+    const lw = this.lowW;
+    const lh = this.lowH;
+    const { landmarkScreen } = renderRoad(ctx, this.edge, view, lw, lh);
 
     // Focus contrast-pull: fade the whole world toward mid-gray by compositing,
     // BEFORE the landmark is drawn so the landmark holds full contrast.
@@ -306,7 +365,7 @@ export class RoadEngine {
       ctx.save();
       ctx.globalAlpha = this.focus * 0.9;
       ctx.fillStyle = "rgb(128,128,128)";
-      ctx.fillRect(0, 0, LOW_W, LOW_H);
+      ctx.fillRect(0, 0, lw, lh);
       ctx.restore();
     }
 
@@ -317,20 +376,13 @@ export class RoadEngine {
     }
 
     // Post: vignette + grain + Bayer dither on the low-res buffer.
-    const img = ctx.getImageData(0, 0, LOW_W, LOW_H);
-    ditherInPlace(img.data, LOW_W, LOW_H, LEVELS, this.manifest.seed & 1023, this.grainPhase);
-    this.buffer = img;
+    const img = ctx.getImageData(0, 0, lw, lh);
+    ditherInPlace(img.data, lw, lh, LEVELS, this.manifest.seed & 1023, this.grainPhase);
     ctx.putImageData(img, 0, 0);
 
-    // Upscale to the display, letterboxed, hard pixels.
-    const dw = this.display.width;
-    const dh = this.display.height;
-    this.dctx.fillStyle = "#000";
-    this.dctx.fillRect(0, 0, dw, dh);
-    const scale = Math.min(dw / LOW_W, dh / LOW_H);
-    const w = LOW_W * scale;
-    const h = LOW_H * scale;
+    // Upscale to fill the whole display — buffer aspect matches the viewport, so
+    // no letterbox bars. Hard pixels (no smoothing).
     this.dctx.imageSmoothingEnabled = false;
-    this.dctx.drawImage(this.low, (dw - w) / 2, (dh - h) / 2, w, h);
+    this.dctx.drawImage(this.low, 0, 0, this.display.width, this.display.height);
   }
 }

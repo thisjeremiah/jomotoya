@@ -10,7 +10,7 @@ import type { RoadKind } from "./manifest";
 
 const SEG_LEN = 200; // world units per segment
 const RUMBLE_LEN = 3; // segments per rumble/stripe color band
-const ROAD_WIDTH = 2000;
+const ROAD_WIDTH = 2600;
 const CAMERA_HEIGHT = 1200;
 const CAMERA_DEPTH = 0.84; // ~ 1/tan(fov/2), fov ~ 100deg
 const DRAW_DISTANCE = 140; // segments rendered ahead
@@ -92,11 +92,18 @@ export function buildEdge(seed: number, key: string, road: RoadKind, destNodeId:
     };
   }
 
-  // Flatten and straighten the final stretch so arrivals read cleanly.
-  const landmarkSeg = total - 45;
-  for (let s = landmarkSeg - 20; s < total; s++) {
-    if (s < 0) continue;
+  // Landmark sits partway along the road (not at the end) so you can drive up
+  // to it, optionally pull off, then continue on to the junction at the end.
+  const landmarkSeg = Math.floor(total * 0.56);
+  // Straighten around the landmark so the optional pull-off frames cleanly...
+  for (let s = landmarkSeg - 16; s <= landmarkSeg + 16; s++) {
+    if (s < 0 || s >= total) continue;
     segments[s].curve *= 0.15;
+  }
+  // ...and flatten the final approach to the junction.
+  for (let s = total - 22; s < total; s++) {
+    if (s < 0) continue;
+    segments[s].curve *= 0.2;
   }
 
   return {
@@ -147,10 +154,15 @@ function project(
 ): Projected {
   const dz = worldZ - camZ || 0.0001;
   const scale = CAMERA_DEPTH / dz;
+  // A single projection unit (half the buffer height) is used for x, y, and
+  // width so pixels stay square and the vertical field of view is fixed. Wider
+  // screens then reveal MORE road to the sides instead of stretching it — which
+  // is what makes the scene fill any aspect ratio cleanly.
+  const unit = height / 2;
   return {
-    x: Math.round(width / 2 + (scale * (worldX - camX) * width) / 2),
-    y: Math.round(height / 2 - (scale * (worldY - camY) * height) / 2),
-    w: Math.round((scale * ROAD_WIDTH * width) / 2),
+    x: Math.round(width / 2 + scale * (worldX - camX) * unit),
+    y: Math.round(height / 2 - scale * (worldY - camY) * unit),
+    w: Math.round(scale * ROAD_WIDTH * unit),
     scale,
   };
 }

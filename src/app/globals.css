@@ -369,3 +369,121 @@ body {
   color: var(--ink-dim);
   white-space: nowrap;
 }
+
+/* ---- Pull-off prompt (opt-in) --------------------------------------- */
+
+.pull-off {
+  position: absolute;
+  left: 50%;
+  bottom: calc(1.75rem + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  z-index: 26;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+  background: rgba(8, 8, 10, 0.82);
+  border: 1px solid var(--ink);
+  padding: 0.75rem 1.15rem;
+  cursor: pointer;
+  backdrop-filter: blur(2px);
+  animation: prompt-rise 0.35s ease both;
+  text-align: center;
+  max-width: min(90vw, 30rem);
+}
+
+.pull-off strong {
+  font-weight: 600;
+}
+
+.pull-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  border: 1px solid var(--line);
+  font-size: 0.75rem;
+  flex: none;
+}
+
+@keyframes prompt-rise {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+/* ---- Touch steering (coarse pointers only) -------------------------- */
+
+.touch-steer {
+  position: absolute;
+  inset: auto 0 0 0;
+  display: none;
+  justify-content: space-between;
+  padding: 0 1rem calc(1rem + env(safe-area-inset-bottom, 0px));
+  z-index: 24;
+  pointer-events: none;
+}
+
+.steer-btn {
+  pointer-events: auto;
+  width: 4.25rem;
+  height: 4.25rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(8, 8, 10, 0.6);
+  color: var(--ink);
+  font-size: 1.6rem;
+  line-height: 1;
+  cursor: pointer;
+  backdrop-filter: blur(2px);
+  touch-action: none;
+  user-select: none;
+}
+
+.steer-btn:active {
+  background: rgba(30, 30, 34, 0.9);
+  border-color: var(--ink);
+}
+
+@media (pointer: coarse) {
+  .touch-steer {
+    display: flex;
+  }
+  /* Keep the centered prompt clear of the corner steer buttons. */
+  .pull-off {
+    bottom: calc(6rem + env(safe-area-inset-bottom, 0px));
+  }
+  .hud {
+    bottom: calc(6rem + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+/* ---- Small screens -------------------------------------------------- */
+
+@media (max-width: 640px) {
+  .reader {
+    background: var(--paper);
+  }
+  .reader-panel {
+    width: 100%;
+    border-left: none;
+  }
+  .reader-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+  .fork {
+    bottom: calc(7.5rem + env(safe-area-inset-bottom, 0px));
+    width: min(92vw, 24rem);
+  }
+}
