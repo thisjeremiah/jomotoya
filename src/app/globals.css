@@ -44,9 +44,10 @@ body {
   height: 100%;
   display: block;
   image-rendering: pixelated;
+  touch-action: manipulation;
 }
 
-/* Faint film framing across the whole viewport. */
+/* Faint film framing across the whole viewport (aesthetic, not UI). */
 .frame-grain {
   position: absolute;
   inset: 0;
@@ -55,131 +56,7 @@ body {
   mix-blend-mode: multiply;
 }
 
-/* ---- Start gate ----------------------------------------------------- */
-
-.start-gate {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: radial-gradient(circle at 50% 45%, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.9));
-  cursor: pointer;
-  z-index: 40;
-}
-
-.start-inner {
-  text-align: center;
-  max-width: 30rem;
-  padding: 2rem;
-}
-
-.start-inner h1 {
-  font-family: var(--font-mono);
-  letter-spacing: 0.4em;
-  font-weight: 600;
-  font-size: clamp(1.4rem, 4vw, 2.4rem);
-  margin: 0 0 1rem;
-  padding-left: 0.4em;
-}
-
-.start-inner p {
-  color: var(--ink-dim);
-  line-height: 1.6;
-  margin: 0 auto 1.5rem;
-  max-width: 24rem;
-}
-
-.start-btn {
-  font-family: var(--font-mono);
-  text-transform: uppercase;
-  letter-spacing: 0.2em;
-  font-size: 0.8rem;
-  color: var(--ink);
-  background: transparent;
-  border: 1px solid var(--ink);
-  padding: 0.85rem 1.6rem;
-  cursor: pointer;
-  transition: background 0.2s, color 0.2s;
-}
-
-.start-btn:hover {
-  background: var(--ink);
-  color: #000;
-}
-
-.keys {
-  margin-top: 1.75rem !important;
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  letter-spacing: 0.08em;
-  opacity: 0.6;
-}
-
-/* ---- HUD + fork ----------------------------------------------------- */
-
-.hud {
-  position: absolute;
-  left: 50%;
-  bottom: 1.5rem;
-  transform: translateX(-50%);
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  color: var(--ink-dim);
-  z-index: 20;
-  pointer-events: none;
-  text-shadow: 0 1px 6px #000;
-}
-
-.fork {
-  position: absolute;
-  left: 50%;
-  bottom: 3.5rem;
-  transform: translateX(-50%);
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-  z-index: 25;
-  width: min(90vw, 24rem);
-}
-
-.fork-btn {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  font-family: var(--font-mono);
-  font-size: 0.82rem;
-  letter-spacing: 0.06em;
-  text-align: left;
-  color: var(--ink);
-  background: rgba(8, 8, 10, 0.82);
-  border: 1px solid var(--line);
-  padding: 0.75rem 1rem;
-  cursor: pointer;
-  backdrop-filter: blur(2px);
-  transition: border-color 0.15s, background 0.15s, transform 0.1s;
-}
-
-.fork-btn:hover {
-  border-color: var(--ink);
-  background: rgba(20, 20, 24, 0.92);
-  transform: translateX(2px);
-}
-
-.fork-num {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.3rem;
-  height: 1.3rem;
-  border: 1px solid var(--line);
-  font-size: 0.7rem;
-  opacity: 0.75;
-}
-
-/* ---- Reading panel -------------------------------------------------- */
+/* ---- Reading panel — real, crisp DOM ------------------------------- */
 
 .reader {
   position: absolute;
@@ -202,6 +79,7 @@ body {
 }
 
 .reader-panel {
+  position: relative;
   width: min(46rem, 100%);
   height: 100%;
   overflow-y: auto;
@@ -210,17 +88,6 @@ body {
   padding: clamp(1.5rem, 5vw, 4rem);
   box-shadow: -30px 0 80px rgba(0, 0, 0, 0.6);
   animation: slidein 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-.reader.read-mode .reader-panel {
-  width: min(38rem, 100%);
-  margin: 0 auto;
-  border-left: none;
-}
-
-.reader.read-mode {
-  justify-content: center;
-  background: var(--paper);
 }
 
 @keyframes slidein {
@@ -234,42 +101,26 @@ body {
   }
 }
 
-.reader-head {
-  display: flex;
+.reader-close {
+  position: sticky;
+  top: 0;
+  float: right;
+  margin-left: 1rem;
+  width: 2.4rem;
+  height: 2.4rem;
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 2rem;
-}
-
-.kicker {
-  font-family: var(--font-mono);
-  font-size: 0.68rem;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  color: var(--ink-dim);
-}
-
-.reader-tools {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.tool {
-  font-family: var(--font-mono);
-  font-size: 0.66rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  justify-content: center;
+  font-size: 1rem;
   color: var(--ink-dim);
   background: transparent;
   border: 1px solid var(--line);
-  padding: 0.4rem 0.7rem;
+  border-radius: 999px;
   cursor: pointer;
   transition: color 0.15s, border-color 0.15s;
-  white-space: nowrap;
 }
 
-.tool:hover {
+.reader-close:hover {
   color: var(--ink);
   border-color: var(--ink);
 }
@@ -370,103 +221,6 @@ body {
   white-space: nowrap;
 }
 
-/* ---- Pull-off prompt (opt-in) --------------------------------------- */
-
-.pull-off {
-  position: absolute;
-  left: 50%;
-  bottom: calc(1.75rem + env(safe-area-inset-bottom, 0px));
-  transform: translateX(-50%);
-  display: inline-flex;
-  align-items: center;
-  gap: 0.6rem;
-  z-index: 26;
-  font-family: var(--font-mono);
-  font-size: 0.82rem;
-  letter-spacing: 0.04em;
-  color: var(--ink);
-  background: rgba(8, 8, 10, 0.82);
-  border: 1px solid var(--ink);
-  padding: 0.75rem 1.15rem;
-  cursor: pointer;
-  backdrop-filter: blur(2px);
-  animation: prompt-rise 0.35s ease both;
-  text-align: center;
-  max-width: min(90vw, 30rem);
-}
-
-.pull-off strong {
-  font-weight: 600;
-}
-
-.pull-key {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.4rem;
-  height: 1.4rem;
-  border: 1px solid var(--line);
-  font-size: 0.75rem;
-  flex: none;
-}
-
-@keyframes prompt-rise {
-  from {
-    opacity: 0;
-    transform: translate(-50%, 8px);
-  }
-  to {
-    opacity: 1;
-    transform: translate(-50%, 0);
-  }
-}
-
-/* ---- Touch steering (coarse pointers only) -------------------------- */
-
-.touch-steer {
-  position: absolute;
-  inset: auto 0 0 0;
-  display: none;
-  justify-content: space-between;
-  padding: 0 1rem calc(1rem + env(safe-area-inset-bottom, 0px));
-  z-index: 24;
-  pointer-events: none;
-}
-
-.steer-btn {
-  pointer-events: auto;
-  width: 4.25rem;
-  height: 4.25rem;
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  background: rgba(8, 8, 10, 0.6);
-  color: var(--ink);
-  font-size: 1.6rem;
-  line-height: 1;
-  cursor: pointer;
-  backdrop-filter: blur(2px);
-  touch-action: none;
-  user-select: none;
-}
-
-.steer-btn:active {
-  background: rgba(30, 30, 34, 0.9);
-  border-color: var(--ink);
-}
-
-@media (pointer: coarse) {
-  .touch-steer {
-    display: flex;
-  }
-  /* Keep the centered prompt clear of the corner steer buttons. */
-  .pull-off {
-    bottom: calc(6rem + env(safe-area-inset-bottom, 0px));
-  }
-  .hud {
-    bottom: calc(6rem + env(safe-area-inset-bottom, 0px));
-  }
-}
-
 /* ---- Small screens -------------------------------------------------- */
 
 @media (max-width: 640px) {
@@ -476,14 +230,5 @@ body {
   .reader-panel {
     width: 100%;
     border-left: none;
-  }
-  .reader-head {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.75rem;
-  }
-  .fork {
-    bottom: calc(7.5rem + env(safe-area-inset-bottom, 0px));
-    width: min(92vw, 24rem);
   }
 }

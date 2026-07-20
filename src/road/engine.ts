@@ -14,39 +14,23 @@ import {
   ROAD,
   type Edge,
 } from "./road";
-import {
-  edgesFrom,
-  nodeById,
-  type Manifest,
-  type ManifestEdge,
-} from "./manifest";
+import { edgesFrom, nodeById, type Manifest } from "./manifest";
 import { RoadAudio } from "./audio";
 
 export type DriveState = "DRIVING" | "FOCUS" | "READING";
 
-export interface ForkOption {
-  edge: ManifestEdge;
-  label: string;
-}
-
 export interface EngineCallbacks {
   /** Reading panel should show (nodeId) or hide (null). */
   onReading: (nodeId: string | null) => void;
-  /** Fork choices to present, or null to clear. */
-  onFork: (options: ForkOption[] | null) => void;
-  /** High-level state, for HUD/hints. */
-  onState: (state: DriveState) => void;
-  /** Optional "pull off to read {label}" prompt, or null to clear it. */
-  onPrompt: (label: string | null) => void;
 }
 
 const BASE_H = 240; // internal vertical resolution — fixes the pixel scale
 const MAX_W = 760; // cap horizontal buffer size (perf on ultrawide)
 const LEVELS = 5; // gray levels out of the dither
 const CRUISE = 7200; // world units / second
-const COAST = 0.34; // speed factor while a landmark is offered (time to decide)
+const COAST = 0.4; // speed factor while a landmark is in reach (time to click)
 const STOP_OFFSET = 9 * ROAD.SEG_LEN; // how far before the obelisk we halt
-const PROMPT_LEAD = 48 * ROAD.SEG_LEN; // show the pull-off prompt this far out
+const APPROACH_LEAD = 48 * ROAD.SEG_LEN; // landmark becomes clickable this far out
 const JUNCTION_MARGIN = 8; // segments of runway kept before the junction
 
 export class RoadEngine {
@@ -68,8 +52,6 @@ export class RoadEngine {
   private state: DriveState = "DRIVING";
   private position = 0;
   private speed = 0;
-  private targetLane = 0;
-  private lane = 0; // eased actual lane
   private focus = 0; // 0..1 arrival contrast-pull
   private camHeight = ROAD.CAMERA_HEIGHT;
   private sway = 0;
@@ -80,8 +62,9 @@ export class RoadEngine {
   private stopPos = Infinity;
   private junctionPos = Infinity;
   private pulledOff = false; // already read this edge's landmark?
-  private nearLandmark = false; // currently inside the pull-off window?
-  private forkPending: ForkOption[] | null = null;
+  private inApproach = false; // landmark within reach (clickable + coast)?
+  private landmarkBox: { x0: number; y0: number; x1: number; y1: number } | null = null;
+  private visits = new Map<string, number>(); // per-node routing cursor
 
   constructor(display: HTMLCanvasElement, manifest: Manifest, cb: EngineCallbacks) {
     this.display = display;
@@ -147,30 +130,25 @@ export class RoadEngine {
     }
   }
 
-  // --- public controls (wired to keyboard / buttons in React) --------------
+  // --- pointer interaction (the only control) ------------------------------
 
-  steer(dir: -1 | 0 | 1): void {
-    if (this.state !== "DRIVING") return;
-    this.targetLane = dir;
+  /**
+   * Is the pointer over the clickable landmark? (fx, fy) are fractions [0,1] of
+   * the display. Used only to show a pointer cursor — a wordless invitation.
+   */
+  isOverLandmark(fx: number, fy: number): boolean {
+    const b = this.landmarkBox;
+    if (!b) return false;
+    const x = fx * this.lowW;
+    const y = fy * this.lowH;
+    return x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1;
   }
 
-  chooseFork(index: number): void {
-    if (!this.forkPending) return;
-    const opt = this.forkPending[index];
-    if (!opt) return;
-    this.forkPending = null;
-    this.cb.onFork(null);
-    this.loadEdgeToward(opt.edge.from, opt.edge.to);
-    this.enterDriving();
-  }
-
-  /** Opt in to reading the landmark ahead. Never happens automatically. */
-  pullOff(): void {
-    if (this.state !== "DRIVING" || !this.nearLandmark || this.forkPending) return;
-    this.nearLandmark = false;
-    this.cb.onPrompt(null);
+  /** A click on the landmark is how you view it. Clicks elsewhere do nothing. */
+  clickAt(fx: number, fy: number): void {
+    if (this.state !== "DRIVING" || this.pulledOff) return;
+    if (!this.isOverLandmark(fx, fy)) return;
     this.state = "FOCUS";
-    this.cb.onState("FOCUS");
     this.audio.sting();
   }
 
@@ -180,27 +158,18 @@ export class RoadEngine {
     this.audio.setReading(false);
     this.cb.onReading(null);
     // Continue forward on the same edge — the junction still waits at its end.
-    this.enterDriving();
+    this.state = "DRIVING";
   }
 
   /** Internal document link: travel to a specific connected node. */
   travelTo(nodeId: string): void {
-    // Only honor links that correspond to a real outgoing road.
     const out = edgesFrom(this.manifest, this.destNodeId);
     const match = out.find((e) => e.to === nodeId);
     this.audio.setReading(false);
     this.cb.onReading(null);
-    this.cb.onPrompt(null);
-    this.forkPending = null;
-    this.cb.onFork(null);
-    if (match) {
-      this.loadEdgeToward(match.from, match.to);
-    } else {
-      // No direct road — fall back to the normal departure logic.
-      this.departFrom(this.destNodeId);
-      return;
-    }
-    this.enterDriving();
+    if (match) this.loadEdgeToward(match.from, match.to);
+    else this.departFrom(this.destNodeId);
+    this.state = "DRIVING";
   }
 
   // --- edge / navigation ---------------------------------------------------
@@ -220,37 +189,28 @@ export class RoadEngine {
     this.junctionPos = (edge.segments.length - JUNCTION_MARGIN) * ROAD.SEG_LEN;
     this.focus = 0;
     this.pulledOff = false;
-    this.nearLandmark = false;
-    this.cb.onPrompt(null);
+    this.inApproach = false;
+    this.landmarkBox = null;
   }
 
-  private enterDriving(): void {
-    this.state = "DRIVING";
-    this.cb.onState("DRIVING");
-  }
-
-  /** Decide the next road after finishing a document. */
+  /**
+   * At a junction, just keep driving — no menu. Cycle through a node's outgoing
+   * roads on repeat visits so the whole graph gets seen over a long drive,
+   * preferring not to immediately double back where we came from.
+   */
   private departFrom(nodeId: string): void {
     const out = edgesFrom(this.manifest, nodeId);
     if (out.length === 0) {
-      // Dead end: turn around and head back the way we came, if possible.
       const back = this.manifest.edges.find((e) => e.to === nodeId);
       if (back) this.loadEdgeToward(back.to, back.from);
-      this.enterDriving();
+      this.state = "DRIVING";
       return;
     }
-    if (out.length === 1) {
-      this.loadEdgeToward(out[0].from, out[0].to);
-      this.enterDriving();
-      return;
-    }
-    // Fork: present choices; the car idles until one is picked.
-    this.forkPending = out.map((e) => ({
-      edge: e,
-      label: e.choice ?? nodeById(this.manifest, e.to).label,
-    }));
-    this.cb.onFork(this.forkPending);
-    this.enterDriving();
+    const n = this.visits.get(nodeId) ?? 0;
+    this.visits.set(nodeId, n + 1);
+    const pick = out[n % out.length];
+    this.loadEdgeToward(pick.from, pick.to);
+    this.state = "DRIVING";
   }
 
   // --- main loop -----------------------------------------------------------
@@ -270,30 +230,23 @@ export class RoadEngine {
   };
 
   private update(dt: number): void {
-    const idlingAtFork = this.forkPending !== null && this.state === "DRIVING";
-
     if (this.state === "DRIVING") {
-      if (!idlingAtFork) {
-        this.position += this.speed * dt;
+      this.position += this.speed * dt;
 
-        // Offer (never force) the pull-off while inside the window before the
-        // landmark. The driver opts in with pullOff(); otherwise they cruise by.
-        const near =
-          !this.pulledOff &&
-          this.position >= this.stopPos - PROMPT_LEAD &&
-          this.position < this.stopPos;
-        if (near !== this.nearLandmark) {
-          this.nearLandmark = near;
-          this.cb.onPrompt(near ? nodeById(this.manifest, this.destNodeId).label : null);
-        }
+      // The landmark ahead is within reach: clickable, and the car coasts so
+      // it's an easy target. No prompt, no text — just the slowdown and the
+      // pointer cursor invite the click.
+      this.inApproach =
+        !this.pulledOff &&
+        this.position >= this.stopPos - APPROACH_LEAD &&
+        this.position < this.stopPos + 6 * ROAD.SEG_LEN;
 
-        // Reaching the end of the road is the junction: pick the next road.
-        if (!this.forkPending && this.position >= this.junctionPos) {
-          this.position = this.junctionPos;
-          this.nearLandmark = false;
-          this.cb.onPrompt(null);
-          this.departFrom(this.destNodeId);
-        }
+      // Reaching the end of the road is the junction: drive straight on.
+      if (this.position >= this.junctionPos) {
+        this.position = this.junctionPos;
+        this.inApproach = false;
+        this.landmarkBox = null;
+        this.departFrom(this.destNodeId);
       }
     } else if (this.state === "FOCUS") {
       // Eased approach to the framed stop point (guaranteed to converge), plus
@@ -307,8 +260,9 @@ export class RoadEngine {
         this.position = this.stopPos;
         this.focus = 1;
         this.pulledOff = true; // don't re-offer this landmark after leaving
+        this.inApproach = false;
+        this.landmarkBox = null;
         this.state = "READING";
-        this.cb.onState("READING");
         this.audio.setReading(true);
         this.cb.onReading(this.destNodeId);
       }
@@ -322,17 +276,14 @@ export class RoadEngine {
       this.camHeight += (ROAD.CAMERA_HEIGHT - this.camHeight) * Math.min(1, dt * 3);
     }
 
-    // Target speed, decided AFTER the state logic so it can react to the
-    // pull-off window: coast down near a landmark to give time to decide.
+    // Target speed: coast while a landmark is in reach so it's easy to click.
     let targetSpeed = CRUISE;
-    if (this.state !== "DRIVING" || idlingAtFork) targetSpeed = 0;
-    else if (this.nearLandmark) targetSpeed = CRUISE * COAST;
+    if (this.state !== "DRIVING") targetSpeed = 0;
+    else if (this.inApproach) targetSpeed = CRUISE * COAST;
     this.speed += (targetSpeed - this.speed) * Math.min(1, dt * (this.state === "FOCUS" ? 2.2 : 3.2));
     if (this.speed < 1 && targetSpeed === 0) this.speed = 0;
 
-    // Lane easing (lagged follow) + sway + bank into the current curve.
-    const laneTarget = this.targetLane * ROAD.LANE_OFFSET;
-    this.lane += (laneTarget - this.lane) * Math.min(1, dt * 4);
+    // Gentle sway for the "operated camera" feel.
     this.sway += dt;
 
     // Audio intensity tracks speed.
@@ -351,7 +302,7 @@ export class RoadEngine {
 
     const view = {
       position: this.position,
-      playerX: this.lane + bank + swayX,
+      playerX: bank + swayX,
       camHeight: this.camHeight + Math.sin(this.sway * 1.7) * 6 * (this.speed / CRUISE),
     };
 
@@ -369,10 +320,23 @@ export class RoadEngine {
       ctx.restore();
     }
 
-    // Landmark billboard on top, sharp.
+    // Landmark billboard on top, sharp — and record its clickable box while the
+    // landmark is in reach (a generous hit area, easy for touch).
     if (landmarkScreen) {
       const label = nodeById(this.manifest, this.edge.landmark.nodeId).label;
       renderLandmark(ctx, landmarkScreen, label, this.focus);
+      if (this.inApproach && landmarkScreen.w > 4) {
+        const p = landmarkScreen;
+        const wob = Math.max(1, p.w * 0.34);
+        const hob = Math.max(2, p.w * 1.15);
+        const halfW = Math.max(wob * 1.5, 10);
+        const top = p.y - hob - wob * 0.6 - (p.w > 26 ? wob * 0.5 + 4 : 0) - 2;
+        this.landmarkBox = { x0: p.x - halfW, y0: top, x1: p.x + halfW, y1: p.y + 3 };
+      } else {
+        this.landmarkBox = null;
+      }
+    } else {
+      this.landmarkBox = null;
     }
 
     // Post: vignette + grain + Bayer dither on the low-res buffer.

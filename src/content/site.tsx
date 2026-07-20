@@ -53,14 +53,12 @@ export const docs: Record<string, Doc> = {
     render: (nav) => (
       <>
         <p>
-          You are stopped at a junction. Everything here has a place: each
-          document is a landmark somewhere down one of these roads, and the only
-          way to read one is to drive to it and pull off.
+          Everything here has a place. Each document is a landmark somewhere
+          along the road, and this one is home.
         </p>
         <p>
-          This is placeholder text standing in for a real home page. Pick a
-          direction — the world will desaturate as you arrive, and the landmark
-          will sharpen into the page you&apos;re reading now.
+          Placeholder text standing in for a real home page — a few words while
+          the engine idles and the world holds still around you.
         </p>
         <nav className="routes">
           <Route to="essays" nav={nav}>Read the essays</Route>
