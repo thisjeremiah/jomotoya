@@ -1,23 +1,371 @@
 @import "tailwindcss";
 
-@theme {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-}
-
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --ink: #e8e8e8;
+  --ink-dim: #9a9a9a;
+  --paper: #0a0a0a;
+  --panel: #101012;
+  --line: #2a2a2e;
+  --font-sans: var(--font-plex-sans, system-ui, sans-serif);
+  --font-mono: var(--font-plex-mono, ui-monospace, monospace);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  overscroll-behavior: none;
+}
+
+/* ---- Scene ---------------------------------------------------------- */
+
+.road-root {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  background: #000;
+  user-select: none;
+}
+
+.road-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  image-rendering: pixelated;
+}
+
+/* Faint film framing across the whole viewport. */
+.frame-grain {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  box-shadow: inset 0 0 180px 40px rgba(0, 0, 0, 0.7);
+  mix-blend-mode: multiply;
+}
+
+/* ---- Start gate ----------------------------------------------------- */
+
+.start-gate {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at 50% 45%, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.9));
+  cursor: pointer;
+  z-index: 40;
+}
+
+.start-inner {
+  text-align: center;
+  max-width: 30rem;
+  padding: 2rem;
+}
+
+.start-inner h1 {
+  font-family: var(--font-mono);
+  letter-spacing: 0.4em;
+  font-weight: 600;
+  font-size: clamp(1.4rem, 4vw, 2.4rem);
+  margin: 0 0 1rem;
+  padding-left: 0.4em;
+}
+
+.start-inner p {
+  color: var(--ink-dim);
+  line-height: 1.6;
+  margin: 0 auto 1.5rem;
+  max-width: 24rem;
+}
+
+.start-btn {
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  font-size: 0.8rem;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--ink);
+  padding: 0.85rem 1.6rem;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+
+.start-btn:hover {
+  background: var(--ink);
+  color: #000;
+}
+
+.keys {
+  margin-top: 1.75rem !important;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  opacity: 0.6;
+}
+
+/* ---- HUD + fork ----------------------------------------------------- */
+
+.hud {
+  position: absolute;
+  left: 50%;
+  bottom: 1.5rem;
+  transform: translateX(-50%);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  z-index: 20;
+  pointer-events: none;
+  text-shadow: 0 1px 6px #000;
+}
+
+.fork {
+  position: absolute;
+  left: 50%;
+  bottom: 3.5rem;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  z-index: 25;
+  width: min(90vw, 24rem);
+}
+
+.fork-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  letter-spacing: 0.06em;
+  text-align: left;
+  color: var(--ink);
+  background: rgba(8, 8, 10, 0.82);
+  border: 1px solid var(--line);
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+  backdrop-filter: blur(2px);
+  transition: border-color 0.15s, background 0.15s, transform 0.1s;
+}
+
+.fork-btn:hover {
+  border-color: var(--ink);
+  background: rgba(20, 20, 24, 0.92);
+  transform: translateX(2px);
+}
+
+.fork-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.3rem;
+  height: 1.3rem;
+  border: 1px solid var(--line);
+  font-size: 0.7rem;
+  opacity: 0.75;
+}
+
+/* ---- Reading panel -------------------------------------------------- */
+
+.reader {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-end;
+  z-index: 50;
+  background: linear-gradient(90deg, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.35) 55%, rgba(0, 0, 0, 0.6) 100%);
+  animation: readerin 0.5s ease both;
+}
+
+@keyframes readerin {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
   }
 }
 
-body {
-  color: var(--foreground);
-  background: var(--background);
+.reader-panel {
+  width: min(46rem, 100%);
+  height: 100%;
+  overflow-y: auto;
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+  padding: clamp(1.5rem, 5vw, 4rem);
+  box-shadow: -30px 0 80px rgba(0, 0, 0, 0.6);
+  animation: slidein 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.reader.read-mode .reader-panel {
+  width: min(38rem, 100%);
+  margin: 0 auto;
+  border-left: none;
+}
+
+.reader.read-mode {
+  justify-content: center;
+  background: var(--paper);
+}
+
+@keyframes slidein {
+  from {
+    transform: translateX(40px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.reader-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.kicker {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.reader-tools {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.tool {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  background: transparent;
+  border: 1px solid var(--line);
+  padding: 0.4rem 0.7rem;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+
+.tool:hover {
+  color: var(--ink);
+  border-color: var(--ink);
+}
+
+.reader-title {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: clamp(2rem, 6vw, 3.4rem);
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+  margin: 0 0 1.5rem;
+}
+
+.reader-body {
+  font-size: 1.05rem;
+  line-height: 1.75;
+  color: #d0d0d0;
+  max-width: 34rem;
+}
+
+.reader-body p {
+  margin: 0 0 1.25rem;
+}
+
+.reader-body a {
+  color: var(--ink);
+  text-underline-offset: 3px;
+}
+
+.reader-body code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: #000;
+  border: 1px solid var(--line);
+  padding: 0.05em 0.35em;
+}
+
+.reader-body .muted {
+  color: var(--ink-dim);
+  font-size: 0.92rem;
+}
+
+.routes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 1.75rem 0;
+}
+
+.route {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  letter-spacing: 0.04em;
+  text-align: left;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--line);
+  padding: 0.85rem 1.1rem;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, padding-left 0.15s;
+}
+
+.route:hover {
+  border-color: var(--ink);
+  background: #000;
+  padding-left: 1.4rem;
+}
+
+.index {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 1.5rem;
+  border-top: 1px solid var(--line);
+}
+
+.index li {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  padding: 0.9rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.idx-title {
+  font-size: 1rem;
+}
+
+.idx-meta {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  white-space: nowrap;
 }

@@ -17,8 +17,9 @@ const plexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "JOMOTOYA",
-  description: "JOMOTOYA",
+  title: "The Road Site",
+  description:
+    "A personal site where content has physical presence — drive a monochrome, cinematic road and pull off at landmarks to read.",
 };
 
 export default function RootLayout({

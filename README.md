@@ -1,36 +1,62 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# The Road Site
 
-## Getting Started
+A personal website where content has physical presence. You drive a monochrome,
+cinematic road; documents are landmarks you pull off to read. Approaching one
+desaturates the world while the landmark sharpens, then a real, crisp HTML page
+fades in.
 
-First, run the development server:
+This is the MVP. All copy is placeholder — the point is the machinery.
+
+## Run it
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+pnpm install
+pnpm dev      # http://localhost:3000
+pnpm build    # static export to ./out
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Click **Start the drive** (needed as the gesture that enables audio), then:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- **← / →** — steer between lanes while driving, or pick a road at a fork
+- **1 / 2 / 3** — pick a fork choice directly
+- **Enter / Esc** — leave a landmark and get back on the road
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## How it fits together
 
-## Learn More
+The architecture follows the project plan's layers:
 
-To learn more about Next.js, take a look at the following resources:
+| Layer | Where |
+| --- | --- |
+| 1 — Content graph (source of truth) | `src/content/site.tsx` — the manifest (nodes + edges) and the documents |
+| 1 — Schema / validation | `src/road/manifest.ts` |
+| 3 — Procedural fill (seed → geometry) | `src/road/rng.ts`, `buildEdge` in `src/road/road.ts` |
+| 4 — Pseudo-3D scanline renderer | `renderRoad` / `renderLandmark` in `src/road/road.ts` |
+| 4 — Bayer dither + fog + vignette + grain | `src/road/bayer.ts` |
+| 5 — Camera rig + `DRIVING → FOCUS → READING` state machine | `src/road/engine.ts` |
+| 6 — Documents (real HTML, not dithered) | `src/content/site.tsx`, `src/components/RoadSite.tsx` |
+| Sound — procedural drone + focus sting | `src/road/audio.ts` |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Editing the world
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+The manifest in `src/content/site.tsx` is the only thing you maintain by hand.
+Add a node and an edge and a new landmark appears down a new road — nothing in
+the renderer changes. The world is deterministic: the same `seed` + manifest
+always generate the same curves, hills, and roadside detail (which is also what
+would make future multiplayer sync tractable).
 
-## Deploy on Vercel
+## Rendering notes
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- Everything is drawn into a **320×240** offscreen canvas, reduced to grayscale,
+  quantized with a **4×4 Bayer** ordered-dither matrix, then upscaled with
+  `image-rendering: pixelated`. Ordered dithering (not Floyd–Steinberg) stays
+  stable frame-to-frame instead of crawling under camera motion.
+- The road is a classic **segment-based pseudo-3D projection** (OutRun lineage) —
+  no WebGL.
+- The **focus contrast-pull** ("arrival" beat) is done by compositing the world
+  toward mid-gray, then drawing the landmark on top at full contrast — cheaper
+  than optical blur and on-aesthetic.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Out of MVP scope (see the plan)
+
+Auto-layout / force-directed placement, multiplayer, true free-roam
+intersections, and the ASCII-filter render mode are all deliberately deferred.
